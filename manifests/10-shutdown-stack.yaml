@@ -39,9 +39,10 @@ metadata:
   namespace: ocp-namespace-shutdown
 data:
   NS_LIST: >-
-    mb-mutui-be
-    mb-mutui-fe
-    mb-mutui-mgw
+    namespace1 
+    namespace2 
+    namespace3 
+    namespaceN
 ---
 apiVersion: batch/v1
 kind: CronJob
