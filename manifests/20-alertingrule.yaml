@@ -1,0 +1,29 @@
+apiVersion: monitoring.openshift.io/v1
+kind: AlertingRule
+metadata:
+  name: ns-shutdown-verify-alerts
+  namespace: openshift-monitoring
+spec:
+  groups:
+    - name: ns-shutdown-verify.rules
+      rules:
+        - alert: NamespaceShutdownVerifyJobFailed
+          expr: |
+            max_over_time(
+              kube_job_status_failed{
+                namespace="ocp-namespace-shutdown",
+                job_name=~"verify-target-namespaces-zero-.*"
+              }[15m]
+            ) > 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+            service: namespace-shutdown
+            namespace_scope: ocp-namespace-shutdown
+          annotations:
+            summary: "Verify job fallito per il controllo namespace spenti"
+            description: "Uno o più Job generati dal CronJob verify-target-namespaces-zero sono falliti nel namespace ocp-namespace-shutdown negli ultimi 15 minuti. Questo indica che almeno un controllo ha rilevato namespace target non completamente scalati a zero oppure un errore di esecuzione del job."
+            impact: "I namespace che dovrebbero restare spenti potrebbero avere deployment o statefulset ancora attivi."
+            action: "Verificare i log del Job/CronJob nel namespace ocp-namespace-shutdown e controllare i deployment/statefulset dei namespace presenti in NS_LIST."
+            runbook_url: "https://example.internal/runbook/namespace-shutdown-verify"

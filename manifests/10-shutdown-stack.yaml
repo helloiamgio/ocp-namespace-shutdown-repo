@@ -1,0 +1,177 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ns-shutdown-sa
+  namespace: ocp-namespace-shutdown
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ns-shutdown-role
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ns-shutdown-rb
+subjects:
+  - kind: ServiceAccount
+    name: ns-shutdown-sa
+    namespace: ocp-namespace-shutdown
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ns-shutdown-role
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ns-shutdown-config
+  namespace: ocp-namespace-shutdown
+data:
+  NS_LIST: >-
+    mb-mutui-be
+    mb-mutui-fe
+    mb-mutui-mgw
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shutdown-target-namespaces
+  namespace: ocp-namespace-shutdown
+spec:
+  schedule: "*/15 * * * *"
+  timeZone: Europe/Rome
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: ns-shutdown-sa
+          restartPolicy: Never
+          containers:
+            - name: shutdown
+              image: quay.io/openshift/origin-cli:4.16
+              env:
+                - name: NS_LIST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ns-shutdown-config
+                      key: NS_LIST
+                - name: DRY_RUN
+                  value: "false"
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  FORBIDDEN='^(openshift|istio|kube|default$|registry|dynatrace|zabbix|sentinelone|flexera|commvault|group-sync-operator|open-cluster-management|conjur)'
+
+                  run() {
+                    if [[ "${DRY_RUN}" == "true" ]]; then
+                      echo "[DRY-RUN] $*"
+                    else
+                      eval "$@"
+                    fi
+                  }
+
+                  for ns in ${NS_LIST}; do
+                    echo "Controllo namespace: ${ns}"
+
+                    if ! oc get ns "${ns}" >/dev/null 2>&1; then
+                      echo "SKIP: namespace inesistente: ${ns}"
+                      continue
+                    fi
+
+                    if [[ "${ns}" =~ ${FORBIDDEN} ]]; then
+                      echo "SKIP: namespace protetto: ${ns}"
+                      continue
+                    fi
+
+                    echo "Shutdown namespace: ${ns}"
+
+                    for d in $(oc -n "${ns}" get deploy -o name 2>/dev/null); do
+                      run "oc -n '${ns}' scale '${d}' --replicas=0"
+                    done
+
+                    for s in $(oc -n "${ns}" get sts -o name 2>/dev/null); do
+                      run "oc -n '${ns}' scale '${s}' --replicas=0"
+                    done
+                  done
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: verify-target-namespaces-zero
+  namespace: ocp-namespace-shutdown
+spec:
+  schedule: "2,17,32,47 * * * *"
+  timeZone: Europe/Rome
+  suspend: false
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: ns-shutdown-sa
+          restartPolicy: Never
+          containers:
+            - name: verify
+              image: quay.io/openshift/origin-cli:4.16
+              env:
+                - name: NS_LIST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: ns-shutdown-config
+                      key: NS_LIST
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  FORBIDDEN='^(openshift|istio|kube|default$|registry|dynatrace|zabbix|sentinelone|flexera|commvault|group-sync-operator|open-cluster-management|conjur)'
+                  FAIL=0
+
+                  for ns in ${NS_LIST}; do
+                    echo "Verifica namespace: ${ns}"
+
+                    if ! oc get ns "${ns}" >/dev/null 2>&1; then
+                      echo "SKIP: namespace inesistente: ${ns}"
+                      continue
+                    fi
+
+                    if [[ "${ns}" =~ ${FORBIDDEN} ]]; then
+                      echo "SKIP: namespace protetto: ${ns}"
+                      continue
+                    fi
+
+                    out="$(oc -n "${ns}" get deploy,sts \
+                      -o custom-columns=KIND:.kind,NAME:.metadata.name,REPLICAS:.spec.replicas --no-headers 2>/dev/null \
+                      | awk '$3 != 0 {print}')"
+
+                    if [[ -n "${out}" ]]; then
+                      echo "KO: ${ns}"
+                      echo "${out}"
+                      FAIL=1
+                    else
+                      echo "OK: ${ns} tutti deploy/sts a 0"
+                    fi
+                  done
+
+                  exit ${FAIL}
