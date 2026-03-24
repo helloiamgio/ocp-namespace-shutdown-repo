@@ -99,7 +99,7 @@ Oppure patch veloce:
 ```bash
 oc patch cm ns-shutdown-config -n ocp-namespace-shutdown \
   --type merge \
-  -p '{"data":{"NS_LIST":"mb-mutui-be mb-mutui-fe mb-mutui-mgw"}}'
+  -p '{"data":{"NS_LIST":"namespace1 namespace2 namespace3 namespaceN"}}'
 ```
 
 ## Sospendere / riattivare
