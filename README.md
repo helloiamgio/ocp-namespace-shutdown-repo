@@ -1,6 +1,6 @@
 # OCP Namespace Shutdown
 
-Repo pronto all'uso per forzare a **0 repliche** tutti i `Deployment` e `StatefulSet` di una lista esplicita di namespace OpenShift, con:
+Cronjob per forzare a **0 repliche** tutti i `Deployment` e `StatefulSet` di una lista esplicita di namespace OpenShift, con:
 
 - `CronJob` di **shutdown** ogni 15 minuti
 - `CronJob` di **verify** 2 minuti dopo
@@ -126,7 +126,7 @@ oc delete -f manifests/10-shutdown-stack.yaml
 oc delete -f manifests/00-namespace.yaml
 ```
 
-## Note importanti
+## Note 
 
 - Il targeting vero è fatto da `NS_LIST`, non dalla regex di esclusione.
 - La regex di esclusione è solo un guardrail aggiuntivo.
